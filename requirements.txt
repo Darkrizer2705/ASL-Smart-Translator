@@ -1,6 +1,6 @@
 # Computer Vision
 opencv-python
-mediapipe
+mediapipe>=0.10.30
 
 # Deep Learning
 tensorflow

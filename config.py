@@ -17,6 +17,11 @@ MODEL_DIR       = os.path.join(BASE_DIR, "models")
 ALPHABET_MODEL  = os.path.join(MODEL_DIR, "alphabet_cnn.h5")
 NUMBER_MODEL    = os.path.join(MODEL_DIR, "number_cnn.h5")
 PHRASE_MODEL    = os.path.join(MODEL_DIR, "phrase_classifier.pkl")
+HAND_LANDMARKER_MODEL = os.path.join(MODEL_DIR, "hand_landmarker.task")
+HAND_LANDMARKER_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+)
 
 # ── Model Settings ─────────────────────────────────
 IMG_SIZE        = (64, 64)
