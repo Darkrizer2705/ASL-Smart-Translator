@@ -1,0 +1,7 @@
+# Ignore dataset subfolders we don't want in Git
+/datasets/alphabets/
+/datasets/numbers/
+/datasets/wlasl/
+
+# Ensure the CSV we want stays tracked
+!/datasets/phrase_landmarks.csv
