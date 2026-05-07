@@ -5,3 +5,7 @@
 
 # Ensure the CSV we want stays tracked
 !/datasets/phrase_landmarks.csv
+
+# Python cache files
+__pycache__/
+*.pyc
