@@ -40,19 +40,49 @@ def main() -> None:
 
     # Live webcam mode — keep original behavior if user runs without --test
     import cv2
-    import mediapipe as mp
+
+    # MediaPipe may expose solutions differently across installs.
+    # Try several import strategies and fail with a clear message.
+    import importlib
+
+    mp_solutions = None
+    use_tasks_api = False
+    hand_landmarker = None
+    mp_image_module = None
+    try:
+        import mediapipe as mp
+        if hasattr(mp, "solutions"):
+            mp_solutions = mp.solutions
+            mp_hands_module = mp_solutions.hands
+            mp_draw_module = mp_solutions.drawing_utils
+        else:
+            # Try Tasks API if solutions is not present
+            try:
+                hand_landmarker_module = importlib.import_module("mediapipe.tasks.python.vision.hand_landmarker")
+                mp_image_module = importlib.import_module("mediapipe.tasks.python.vision.core.image")
+                use_tasks_api = True
+            except Exception:
+                raise SystemExit("Could not find a compatible MediaPipe API (solutions or tasks).")
+    except Exception as e:
+        raise SystemExit("Could not import MediaPipe: " + str(e))
 
     with model_path.open("rb") as f:
         data = pickle.load(f)
     model = data["model"]
     encoder = data["encoder"]
 
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
-    mp_draw = mp.solutions.drawing_utils
+    if use_tasks_api:
+        model_file = Path("models/hand_landmarker.task")
+        if not model_file.exists():
+            raise SystemExit(f"Hand landmarker model not found at {model_file}; place the .task file there.")
+        hand_landmarker = hand_landmarker_module.HandLandmarker.create_from_model_path(str(model_file))
+        mp_draw = None
+    else:
+        hands = mp_hands_module.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
+        mp_draw = mp_draw_module
 
     cap = cv2.VideoCapture(0)
-    print("✅ Phrase recognition started. Press Q to quit.")
+    print("Phrase recognition started. Press Q to quit.")
 
     sentence = []
     last_prediction = ""
@@ -67,16 +97,20 @@ def main() -> None:
 
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb)
+        if use_tasks_api:
+            mp_image_obj = mp_image_module.Image.create_from_array(rgb)
+            results = hand_landmarker.detect(mp_image_obj)
+        else:
+            results = hands.process(rgb)
 
         prediction = ""
         confidence = 0.0
 
-        if results.multi_hand_landmarks:
-            for hand_lms in results.multi_hand_landmarks:
-                mp_draw.draw_landmarks(frame, hand_lms, mp.solutions.hands.HAND_CONNECTIONS)
+        if use_tasks_api:
+            if results.hand_landmarks:
+                hand_lms = results.hand_landmarks[0]
                 row = []
-                for lm in hand_lms.landmark:
+                for lm in hand_lms:
                     row.extend([lm.x, lm.y, lm.z])
 
                 features = np.array(row).reshape(1, -1)
@@ -95,6 +129,30 @@ def main() -> None:
                     if not sentence or sentence[-1] != prediction:
                         sentence.append(prediction)
                     stable_count = 0
+        else:
+            if results.multi_hand_landmarks:
+                for hand_lms in results.multi_hand_landmarks:
+                    mp_draw.draw_landmarks(frame, hand_lms, mp_hands_module.HAND_CONNECTIONS)
+                    row = []
+                    for lm in hand_lms.landmark:
+                        row.extend([lm.x, lm.y, lm.z])
+
+                    features = np.array(row).reshape(1, -1)
+                    probs = model.predict_proba(features)[0]
+                    confidence = float(np.max(probs))
+                    pred_idx = int(np.argmax(probs))
+                    prediction = encoder.inverse_transform([pred_idx])[0]
+
+                    if prediction == last_prediction:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+                        last_prediction = prediction
+
+                    if stable_count == STABLE_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD:
+                        if not sentence or sentence[-1] != prediction:
+                            sentence.append(prediction)
+                        stable_count = 0
 
         h, w = frame.shape[:2]
         cv2.rectangle(frame, (0, 0), (w, 80), (0, 0, 0), -1)
@@ -114,15 +172,15 @@ def main() -> None:
             break
         elif key == ord('c'):
             sentence = []
-            print("🗑️  Sentence cleared")
+            print("Sentence cleared")
         elif key == ord('u'):
             if sentence:
                 removed = sentence.pop()
-                print(f"↩️  Removed: {removed}")
+                print(f" Removed: {removed}")
 
     cap.release()
     cv2.destroyAllWindows()
-    print(f"\n📝 Final sentence: {' '.join(sentence)}")
+    print(f"\nFinal sentence: {' '.join(sentence)}")
 
 
 if __name__ == "__main__":
