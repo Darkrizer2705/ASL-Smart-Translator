@@ -2,13 +2,19 @@
 import os
 
 # ── Paths ──────────────────────────────────────────
-BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR        = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATASET_DIR     = os.path.join(BASE_DIR, "datasets")
 
 ALPHABET_DIR    = os.path.join(DATASET_DIR, "alphabets")
 NUMBERS_DIR     = os.path.join(DATASET_DIR, "numbers")
 WLASL_DIR       = os.path.join(DATASET_DIR, "wlasl")
 
+ALPHABET_TRAIN_DIR = os.path.join(ALPHABET_DIR, "asl_alphabet_train", "asl_alphabet_train")
+ALPHABET_TEST_DIR  = os.path.join(ALPHABET_DIR, "asl_alphabet_test")
+NUMBERS_TRAIN_DIR  = os.path.join(NUMBERS_DIR, "Train_Nums")
+NUMBERS_TEST_DIR   = os.path.join(NUMBERS_DIR, "Test_Nums")
+
+GESTURE_CSV     = os.path.join(DATASET_DIR, "gesture_dataset.csv")
 PHRASE_CSV      = os.path.join(DATASET_DIR, "phrase_landmarks.csv")
 MY_CSV          = os.path.join(DATASET_DIR, "my_phrase_landmarks.csv")
 COMBINED_CSV    = os.path.join(DATASET_DIR, "combined_landmarks.csv")
