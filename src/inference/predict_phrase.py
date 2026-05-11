@@ -1,8 +1,13 @@
 # src/inference/predict_phrase.py
+from pathlib import Path
+import sys
+
 import cv2
 import numpy as np
 import pickle
-import time
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR))
 
 # ── Load Model ─────────────────────────────────────
 print("Loading phrase model...")
@@ -17,22 +22,17 @@ print(f"Expected features: {model.n_features_in_}")
 
 # ── MediaPipe Tasks API ───────────────────────────
 import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
-from mediapipe.tasks.python.vision.core import vision_task_running_mode
-from mediapipe import Image, ImageFormat
-
-# Create HandLandmarker from task file
-base_options = python.BaseOptions(model_asset_path='models/hand_landmarker.task')
-options = vision.HandLandmarkerOptions(
-    base_options=base_options,
-    running_mode=vision_task_running_mode.VisionTaskRunningMode.IMAGE,
-    num_hands=1,
-    min_hand_detection_confidence=0.6,
-    min_hand_presence_confidence=0.6,
-    min_tracking_confidence=0.5
+from src.utils.mediapipe_utils import (
+    create_hands_detector,
+    extract_landmark_vector,
+    frame_to_mp_image,
 )
-hand_landmarker = vision.HandLandmarker.create_from_options(options)
+
+hands = create_hands_detector(
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7,
+)
 print("MediaPipe Tasks API loaded")
 
 # ── State ──────────────────────────────────────────
@@ -48,20 +48,6 @@ cap = cv2.VideoCapture(0)
 print("\nStarted. Controls: A=Add word  C=Clear  U=Undo  Q=Quit\n")
 
 
-def extract_normalized_features(hand_landmarks):
-    base_x = hand_landmarks[0].x
-    base_y = hand_landmarks[0].y
-    base_z = hand_landmarks[0].z
-
-    row = []
-    for lm in hand_landmarks:
-        row.extend([
-            lm.x - base_x,
-            lm.y - base_y,
-            lm.z - base_z,
-        ])
-    return row
-
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -69,11 +55,7 @@ while True:
 
     frame      = cv2.flip(frame, 1)
     h, w       = frame.shape[:2]
-    rgb        = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    
-    # Tasks API: Wrap in Image object
-    mp_image = Image(image_format=ImageFormat.SRGB, data=rgb)
-    results = hand_landmarker.detect(mp_image)
+    results = hands.detect(frame_to_mp_image(frame))
 
     prediction  = ""
     confidence  = 0.0
@@ -83,7 +65,6 @@ while True:
         hand_lms = results.hand_landmarks[0]
 
         # ── Draw landmarks ────────────────────────
-        # Draw connections manually since Tasks API landmark format is different
         connections = [
             (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
             (0, 5), (5, 6), (6, 7), (7, 8),  # index
@@ -99,16 +80,15 @@ while True:
                 x2 = int(hand_lms[end].x * w)
                 y2 = int(hand_lms[end].y * h)
                 cv2.line(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
-        
-        # Draw circles for landmarks
+
         for lm in hand_lms:
             x = int(lm.x * w)
             y = int(lm.y * h)
             cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
 
         # ── Extract features in EXACT same order ──
-        # Match the wrist-relative normalization used during dataset creation.
-        row = extract_normalized_features(hand_lms)
+        # Match the wrist-relative single-hand normalization used during collection.
+        row = extract_landmark_vector(hand_lms)
 
         # Verify feature count
         if len(row) != model.n_features_in_:
