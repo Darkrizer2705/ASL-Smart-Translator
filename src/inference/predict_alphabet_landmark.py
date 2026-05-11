@@ -1,10 +1,21 @@
 # src/inference/predict_alphabet_landmark.py
 # Uses MediaPipe landmarks instead of raw image — much more accurate
 import cv2
-import mediapipe as mp
 import numpy as np
 import pickle
 import os
+import sys
+from pathlib import Path
+
+# Add project root to path
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR))
+
+from src.utils.mediapipe_utils import (
+    create_hands_detector,
+    extract_landmark_vector,
+    frame_to_mp_image,
+)
 
 # ── Check if landmark-based alphabet model exists ──
 LANDMARK_MODEL = "models/alphabet_landmark_classifier.pkl"
@@ -19,17 +30,12 @@ with open(LANDMARK_MODEL, "rb") as f:
     model = data["model"]
     encoder = data["encoder"]
 
-# ── MediaPipe ──────────────────────────────────────
-try:
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1,
-                           min_detection_confidence=0.7)
-    mp_draw = mp.solutions.drawing_utils
-except:
-    import mediapipe.python.solutions.hands as mp_hands_module
-    hands = mp_hands_module.Hands(static_image_mode=False, max_num_hands=1,
-                                  min_detection_confidence=0.7)
-    mp_draw = None
+# ── MediaPipe Tasks API ────────────────────────────
+hands = create_hands_detector(
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7,
+)
 
 cap = cv2.VideoCapture(0)
 print(" Landmark-based alphabet recognition. Press Q to quit.")
@@ -47,40 +53,46 @@ while True:
 
     frame = cv2.flip(frame, 1)
     h, w = frame.shape[:2]
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = hands.process(rgb)
 
     prediction = ""
     confidence = 0.0
 
-    if results.multi_hand_landmarks:
-        for hand_lms in results.multi_hand_landmarks:
-            if mp_draw:
-                mp_draw.draw_landmarks(frame, hand_lms,
-                    mp.solutions.hands.HAND_CONNECTIONS)
+    try:
+        mp_image = frame_to_mp_image(frame)
+        detection_result = hands.detect(mp_image)
 
-            row = []
-            for lm in hand_lms.landmark:
-                row.extend([lm.x, lm.y, lm.z])
+        if detection_result.hand_landmarks and len(detection_result.hand_landmarks) > 0:
+            hand_landmarks = detection_result.hand_landmarks[0]
+            features = extract_landmark_vector(hand_landmarks)
+            
+            if features is not None and len(features) == 63:
+                features = np.array(features).reshape(1, -1)
+                probs = model.predict_proba(features)[0]
+                confidence = np.max(probs)
+                pred_idx = np.argmax(probs)
+                prediction = encoder.classes_[pred_idx]
 
-            features = np.array(row).reshape(1, -1)
-            probs = model.predict_proba(features)[0]
-            confidence = np.max(probs)
-            pred_idx = np.argmax(probs)
-            prediction = encoder.inverse_transform([pred_idx])[0]
+                if prediction == last_prediction:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+                    last_prediction = prediction
 
-            if prediction == last_prediction:
-                stable_count += 1
+                if stable_count == STABLE_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD:
+                    if prediction not in ["del", "nothing", "space"]:
+                        word.append(prediction.upper())
+                    elif prediction == "del" and word:
+                        word.pop()
+                    stable_count = 0
             else:
-                stable_count = 0
-                last_prediction = prediction
+                prediction = "No hand"
+                confidence = 0.0
+        else:
+            prediction = "No hand"
+            confidence = 0.0
 
-            if stable_count == STABLE_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD:
-                if prediction not in ["del", "nothing", "space"]:
-                    word.append(prediction.upper())
-                elif prediction == "del" and word:
-                    word.pop()
-                stable_count = 0
+    except Exception as e:
+        pass
 
     # ── UI ─────────────────────────────────────────
     cv2.rectangle(frame, (0, 0), (w, 90), (0, 0, 0), -1)
