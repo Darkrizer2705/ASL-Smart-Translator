@@ -12,7 +12,10 @@ from mediapipe.tasks.python.vision import hand_landmarker
 from mediapipe.tasks.python.vision.core import image as image_lib
 from mediapipe.tasks.python.vision.core import vision_task_running_mode
 
-from config import HAND_LANDMARKER_MODEL, HAND_LANDMARKER_MODEL_URL, MODEL_DIR
+try:
+    from config import HAND_LANDMARKER_MODEL, HAND_LANDMARKER_MODEL_URL, MODEL_DIR
+except ModuleNotFoundError:  # pragma: no cover - import path depends on entrypoint
+    from src.data.config import HAND_LANDMARKER_MODEL, HAND_LANDMARKER_MODEL_URL, MODEL_DIR
 
 mp_hands = hand_landmarker
 mp_draw = drawing_utils
@@ -48,15 +51,30 @@ def create_hands_detector(
     return hand_landmarker.HandLandmarker.create_from_options(options)
 
 
-def extract_landmark_vector(hand_landmarks: Optional[object]) -> List[float]:
+def _normalized_landmark_vector(hand_landmarks: Optional[object]) -> List[float]:
     if hand_landmarks is None:
         return []
 
     landmarks = getattr(hand_landmarks, "landmark", hand_landmarks)
+    if not landmarks:
+        return []
+
+    base_x = landmarks[0].x
+    base_y = landmarks[0].y
+    base_z = landmarks[0].z
+
     values: List[float] = []
     for landmark in landmarks:
-        values.extend([landmark.x, landmark.y, landmark.z])
+        values.extend([
+            landmark.x - base_x,
+            landmark.y - base_y,
+            landmark.z - base_z,
+        ])
     return values
+
+
+def extract_landmark_vector(hand_landmarks: Optional[object]) -> List[float]:
+    return _normalized_landmark_vector(hand_landmarks)
 
 
 def frame_to_mp_image(frame: np.ndarray) -> image_lib.Image:
