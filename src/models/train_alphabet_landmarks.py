@@ -17,8 +17,8 @@ y_enc = le.fit_transform(y)
 X_train, X_test, y_train, y_test = train_test_split(
     X, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
 
-model = RandomForestClassifier(n_estimators=200, max_depth=20,
-                                random_state=42, n_jobs=-1)
+model = RandomForestClassifier(n_estimators=300, max_depth=25, min_samples_split=3,
+                                random_state=42, n_jobs=-1, verbose=1)
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 print(f"✅ Accuracy: {accuracy_score(y_test, y_pred)*100:.2f}%")
