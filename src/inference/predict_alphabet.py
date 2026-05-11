@@ -1,16 +1,36 @@
 # src/inference/predict_alphabet.py
 import cv2
 import numpy as np
-import json
-import tensorflow as tf
+import pickle
+import sys
+from pathlib import Path
+
+# Add project root to path
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR))
 
 # ── Load Model ─────────────────────────────────────
-model = tf.keras.models.load_model("models/alphabet_cnn.h5")
-with open("models/alphabet_classes.json") as f:
-    class_indices = json.load(f)
-    classes = {v: k for k, v in class_indices.items()}
+print("Loading alphabet model...")
+with open("models/alphabet_landmark_classifier.pkl", "rb") as f:
+    model_data = pickle.load(f)
+    model = model_data["model"]
+    encoder = model_data["encoder"]
 
-IMG_SIZE = (64, 64)
+print(f"Model loaded — {len(encoder.classes_)} alphabet classes")
+print(f"Classes: {list(encoder.classes_)}")
+
+from src.utils.mediapipe_utils import (
+    create_hands_detector,
+    extract_landmark_vector,
+    frame_to_mp_image,
+)
+
+hands = create_hands_detector(
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7,
+)
+print("MediaPipe Tasks API loaded")
 cap = cv2.VideoCapture(0)
 print(" Alphabet recognition started. Press Q to quit.")
 
@@ -28,38 +48,37 @@ while True:
     frame = cv2.flip(frame, 1)
     h, w = frame.shape[:2]
 
-    # ── ROI — bottom RIGHT corner (where your hand naturally is) ──
-    roi_size = 220
-    roi_x = w - roi_size - 20   # right side
-    roi_y = h - roi_size - 20   # bottom
-    roi = frame[roi_y:roi_y+roi_size, roi_x:roi_x+roi_size]
-
-    # Draw ROI box in GREEN
-    cv2.rectangle(frame, (roi_x, roi_y),
-                  (roi_x+roi_size, roi_y+roi_size), (0, 255, 0), 2)
-    cv2.putText(frame, "Show hand here",
-                (roi_x, roi_y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
     prediction = ""
     confidence = 0.0
 
     try:
-        img = cv2.resize(roi, IMG_SIZE)
-        img = img / 255.0
-        img = np.expand_dims(img, axis=0)
-        probs = model.predict(img, verbose=0)[0]
-        confidence = np.max(probs)
-        pred_idx = np.argmax(probs)
-        prediction = classes[pred_idx]
+        mp_image = frame_to_mp_image(frame)
+        detection_result = hands.detect(mp_image)
+        
+        if detection_result.hand_landmarks and len(detection_result.hand_landmarks) > 0:
+            hand_landmarks = detection_result.hand_landmarks[0]
+            features = extract_landmark_vector(hand_landmarks)
+            
+            if features is not None and len(features) == 63:
+                features = np.array(features).reshape(1, -1)
+                probs = model.predict_proba(features)[0]
+                confidence = np.max(probs)
+                pred_idx = np.argmax(probs)
+                prediction = encoder.classes_[pred_idx]
+            else:
+                prediction = "Unknown"
+                confidence = 0.0
+        else:
+            prediction = "No hand"
+            confidence = 0.0
 
-        if prediction == last_prediction:
+        if prediction == last_prediction and prediction not in ["No hand", "Unknown"]:
             stable_count += 1
         else:
             stable_count = 0
             last_prediction = prediction
 
-        if stable_count == STABLE_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD:
+        if stable_count == STABLE_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD and prediction not in ["No hand", "Unknown"]:
             if prediction not in ["del", "nothing", "space"]:
                 word.append(prediction.upper())
             elif prediction == "space":
@@ -101,3 +120,4 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 print(f"\n📝 Spelled: {''.join(word)}")
+print("✅ Alphabet recognition ended")
