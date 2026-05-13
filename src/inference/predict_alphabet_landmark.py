@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from src.utils.mediapipe_utils import (
     create_hands_detector,
+    draw_hand_landmarks,
     extract_landmark_vector,
     frame_to_mp_image,
 )
@@ -90,6 +91,7 @@ def main():
             try:
                 mp_image = frame_to_mp_image(frame)
                 detection_result = hands.detect(mp_image)
+                draw_hand_landmarks(frame, detection_result)
 
                 if detection_result.hand_landmarks and len(detection_result.hand_landmarks) > 0:
                     hand_landmarks = detection_result.hand_landmarks[0]

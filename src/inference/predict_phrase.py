@@ -20,23 +20,12 @@ print(f"Model loaded — {len(encoder.classes_)} phrases")
 print(f"Classes: {list(encoder.classes_)}")
 print(f"Expected features: {model.n_features_in_}")
 
-# ── MediaPipe Tasks API ───────────────────────────
-import mediapipe as mp
 from src.utils.mediapipe_utils import (
     create_hands_detector,
+    draw_hand_landmarks,
     extract_landmark_vector,
     frame_to_mp_image,
 )
-
-# MediaPipe landmark connections used for drawing each hand.
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
-    (0, 5), (5, 6), (6, 7), (7, 8),  # index
-    (5, 9), (9, 10), (10, 11), (11, 12),  # middle
-    (9, 13), (13, 14), (14, 15), (15, 16),  # ring
-    (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
-    (0, 17), (0, 5), (0, 9),  # palm
-]
 
 hands = create_hands_detector(
     max_num_hands=2,
@@ -44,21 +33,6 @@ hands = create_hands_detector(
     min_tracking_confidence=0.7,
 )
 print("MediaPipe Tasks API loaded")
-
-
-def draw_hand_landmarks(frame, hand_lms, width, height, color=(0, 255, 0)):
-    for start, end in HAND_CONNECTIONS:
-        if start < len(hand_lms) and end < len(hand_lms):
-            x1 = int(hand_lms[start].x * width)
-            y1 = int(hand_lms[start].y * height)
-            x2 = int(hand_lms[end].x * width)
-            y2 = int(hand_lms[end].y * height)
-            cv2.line(frame, (x1, y1), (x2, y2), color, 1)
-
-    for lm in hand_lms:
-        x = int(lm.x * width)
-        y = int(lm.y * height)
-        cv2.circle(frame, (x, y), 3, color, -1)
 
 
 def build_feature_vector(hand_landmarks_list, expected_features):
@@ -106,17 +80,13 @@ while True:
     frame      = cv2.flip(frame, 1)
     h, w       = frame.shape[:2]
     results = hands.detect(frame_to_mp_image(frame))
+    draw_hand_landmarks(frame, results)
 
     prediction  = ""
     confidence  = 0.0
     hand_found  = False
 
     if results.hand_landmarks and len(results.hand_landmarks) > 0:
-        # Draw every detected hand.
-        for hand_index, hand_lms in enumerate(results.hand_landmarks):
-            draw_color = (0, 255, 0) if hand_index == 0 else (0, 180, 255)
-            draw_hand_landmarks(frame, hand_lms, w, h, draw_color)
-
         # Build features from one or two hands.
         row = build_feature_vector(results.hand_landmarks, model.n_features_in_)
 
