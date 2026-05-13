@@ -207,4 +207,4 @@ if __name__ == "__main__":
     print("\n" + "="*70)
     print("NEXT STEP: Retrain model")
     print("="*70)
-    print("Run: python src/models/train_phrases_improved.py")
+    print("Run: python src/models/train_phrases.py")
