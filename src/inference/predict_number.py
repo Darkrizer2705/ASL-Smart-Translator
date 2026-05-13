@@ -11,8 +11,9 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from src.utils.mediapipe_utils import (
     create_hands_detector,
-    extract_landmark_vector,
+    draw_hand_landmarks,
     frame_to_mp_image,
+    get_hand_bbox,
 )
 
 
@@ -81,9 +82,37 @@ def preprocess_frame(frame):
     return np.expand_dims(normalized, axis=0)
 
 
+def square_crop_from_bbox(frame, bbox, padding=25):
+    """Return a square crop around the detected hand so prediction follows it."""
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = bbox
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    side = max(x2 - x1, y2 - y1) + padding * 2
+    side = min(side, w, h)
+
+    crop_x1 = max(0, min(w - side, cx - side // 2))
+    crop_y1 = max(0, min(h - side, cy - side // 2))
+    crop_x2 = crop_x1 + side
+    crop_y2 = crop_y1 + side
+
+    return frame[crop_y1:crop_y2, crop_x1:crop_x2], (
+        int(crop_x1),
+        int(crop_y1),
+        int(crop_x2),
+        int(crop_y2),
+    )
+
+
 def main():
+    hands = create_hands_detector(
+        max_num_hands=1,
+        min_detection_confidence=0.7,
+        min_tracking_confidence=0.7,
+    )
     cap = open_camera(0)
     if cap is None:
+        hands.close()
         print("❌ Could not open camera 0.")
         print("Close other apps using the webcam, check Windows camera permissions, or try another camera index.")
         return
@@ -104,51 +133,59 @@ def main():
             frame = cv2.flip(frame, 1)
             h, w = frame.shape[:2]
 
-            # ── Define prediction box (right side, 300x300) ────────────
-            box_size = 300
-            box_x1 = w - box_size - 20  # 20px margin from right edge
-            box_y1 = (h - box_size) // 2  # Centered vertically
-            box_x2 = box_x1 + box_size
-            box_y2 = box_y1 + box_size
-
             prediction = ""
             confidence = 0.0
+            hand_found = False
+            crop_box = None
 
             try:
-                # Extract only the box region
-                box_region = frame[box_y1:box_y2, box_x1:box_x2]
-                
-                # Preprocess box region for CNN
-                input_frame = preprocess_frame(box_region)
-                
-                # Get predictions
-                probs = model.predict(input_frame, verbose=0)[0]
-                all_probs = probs
-                confidence = np.max(probs)
-                pred_idx = np.argmax(probs)
-                prediction = idx_to_class[pred_idx]
+                clean_frame = frame.copy()
+                detection_result = hands.detect(frame_to_mp_image(frame))
+                draw_hand_landmarks(frame, detection_result)
 
-                if prediction == last_prediction:
-                    stable_count += 1
+                if detection_result.hand_landmarks and len(detection_result.hand_landmarks) > 0:
+                    hand_found = True
+                    bbox = get_hand_bbox(detection_result.hand_landmarks[0], w, h, padding=20)
+
+                    if bbox:
+                        box_region, crop_box = square_crop_from_bbox(clean_frame, bbox)
+                        input_frame = preprocess_frame(box_region)
+
+                        probs = model.predict(input_frame, verbose=0)[0]
+                        all_probs = probs
+                        confidence = np.max(probs)
+                        pred_idx = np.argmax(probs)
+                        prediction = idx_to_class[pred_idx]
+
+                        if prediction == last_prediction:
+                            stable_count += 1
+                        else:
+                            stable_count = 0
+                            last_prediction = prediction
+                    else:
+                        prediction = "No hand"
+                        stable_count = 0
                 else:
+                    prediction = "No hand"
                     stable_count = 0
-                    last_prediction = prediction
 
             except Exception as exc:
                 print(f"❌ Prediction error: {exc}", file=sys.stderr)
                 prediction = "Error"
                 confidence = 0.0
 
-            # ── Draw prediction box ────────────────────────────────
+            # ── Draw moving prediction box around the tracked hand ────────────
             box_color = (0, 255, 0) if confidence >= CONFIDENCE_THRESHOLD else (0, 165, 255)
-            cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
+            if crop_box:
+                box_x1, box_y1, box_x2, box_y2 = crop_box
+                cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
 
             # ── Top bar ────────────────────────────────
             cv2.rectangle(frame, (0, 0), (w, 90), (0, 0, 0), -1)
             color = (0, 255, 0) if confidence >= CONFIDENCE_THRESHOLD else (0, 165, 255)
             cv2.putText(
                 frame,
-                f"Number: {prediction}",
+                f"Number: {prediction if hand_found else 'Show your hand'}",
                 (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.5,
@@ -185,6 +222,7 @@ def main():
     finally:
         cap.release()
         cv2.destroyAllWindows()
+        hands.close()
 
 
 if __name__ == "__main__":
