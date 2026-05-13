@@ -15,7 +15,7 @@ from src.utils.mediapipe_utils import (
     frame_to_mp_image,
 )
 
-NUMBERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+NUMBERS = [ "1", "2", "3", "4", "5", "6", "7", "8", "9","10"]
 FEATURE_COUNT = 63
 OUTPUT_CSV = "datasets/number_landmarks.csv"
 

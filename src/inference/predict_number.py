@@ -14,12 +14,15 @@ from src.utils.mediapipe_utils import (
     draw_hand_landmarks,
     extract_landmark_vector,
     frame_to_mp_image,
+    get_hand_bbox,
 )
 
+
 LANDMARK_MODEL = ROOT_DIR / "models" / "number_landmark_classifier.pkl"
-STABLE_THRESHOLD = 12
+STABLE_THRESHOLD = 15
 CONFIDENCE_THRESHOLD = 0.65
-FEATURE_COUNT = 63
+BOX_SIZE = 300
+BOX_MARGIN = 20
 
 
 def open_camera(camera_index=0):
@@ -47,34 +50,54 @@ def open_camera(camera_index=0):
 
 
 def load_model():
-    if not os.path.exists(LANDMARK_MODEL):
+    if not LANDMARK_MODEL.exists():
         print("Number landmark model not found.")
         print(f"Expected it at: {LANDMARK_MODEL}")
-        print("Run: python src/models/train_number_landmarks.py first")
+        print("Run: python src/models/train_numbers.py --mode landmarks first")
         sys.exit(1)
 
-    with open(LANDMARK_MODEL, "rb") as f:
-        data = pickle.load(f)
+    with LANDMARK_MODEL.open("rb") as file_handle:
+        data = pickle.load(file_handle)
 
-    return data["model"], data["encoder"]
+    model = data["model"]
+    encoder = data["encoder"]
+    labels = list(encoder.classes_)
+    return model, labels
 
 
-def predict_number(model, encoder, hand_landmarks):
+def get_prediction_box(width, height):
+    box_x1 = max(width - BOX_SIZE - BOX_MARGIN, 0)
+    box_y1 = max((height - BOX_SIZE) // 2, 0)
+    box_x2 = min(box_x1 + BOX_SIZE, width - 1)
+    box_y2 = min(box_y1 + BOX_SIZE, height - 1)
+    return box_x1, box_y1, box_x2, box_y2
+
+
+def bbox_overlaps_box(bbox, box):
+    if bbox is None:
+        return False
+
+    x1, y1, x2, y2 = bbox
+    bx1, by1, bx2, by2 = box
+    return not (x2 < bx1 or x1 > bx2 or y2 < by1 or y1 > by2)
+
+
+def predict_number(model, labels, hand_landmarks):
     features = extract_landmark_vector(hand_landmarks)
-    if len(features) != FEATURE_COUNT:
-        return "", 0.0, np.zeros(len(encoder.classes_))
+    if not features or len(features) != 63:
+        return "", 0.0, np.zeros(len(labels))
 
-    features = np.array(features, dtype=np.float32).reshape(1, -1)
-    probs = model.predict_proba(features)[0]
+    input_batch = np.array(features, dtype=np.float32).reshape(1, -1)
+    probs = model.predict_proba(input_batch)[0]
     confidence = float(np.max(probs))
     pred_idx = int(np.argmax(probs))
-    prediction = str(encoder.classes_[pred_idx])
+    prediction = labels[pred_idx]
     return prediction, confidence, probs
 
 
 def main():
-    model, encoder = load_model()
-    print(f"Classes: {list(encoder.classes_)}")
+    model, labels = load_model()
+    print(f"Classes: {labels}")
 
     hands = create_hands_detector(
         max_num_hands=1,
@@ -92,7 +115,7 @@ def main():
 
     last_prediction = ""
     stable_count = 0
-    all_probs = np.zeros(len(encoder.classes_))
+    all_probs = np.zeros(len(labels))
 
     try:
         while True:
@@ -103,39 +126,61 @@ def main():
 
             frame = cv2.flip(frame, 1)
             height, width = frame.shape[:2]
+            prediction_box = get_prediction_box(width, height)
 
-            prediction = "No hand"
+            prediction = "Show your hand"
             confidence = 0.0
             hand_found = False
+            hand_inside_box = False
+            bbox = None
 
             try:
                 detection_result = hands.detect(frame_to_mp_image(frame))
-                draw_hand_landmarks(frame, detection_result)
 
                 if detection_result.hand_landmarks:
                     hand_found = True
-                    prediction, confidence, all_probs = predict_number(
-                        model,
-                        encoder,
-                        detection_result.hand_landmarks[0],
-                    )
+                    hand_landmarks = detection_result.hand_landmarks[0]
+                    bbox = get_hand_bbox(hand_landmarks, width, height, padding=25)
+                    hand_inside_box = bbox_overlaps_box(bbox, prediction_box)
 
-                    if prediction == last_prediction:
-                        stable_count += 1
+                    if hand_inside_box:
+                        prediction, confidence, all_probs = predict_number(
+                            model,
+                            labels,
+                            hand_landmarks,
+                        )
+
+                        if prediction == last_prediction:
+                            stable_count += 1
+                        else:
+                            stable_count = 0
+                            last_prediction = prediction
                     else:
                         stable_count = 0
-                        last_prediction = prediction
+                        all_probs = np.zeros(len(labels))
+
                 else:
                     stable_count = 0
+                    all_probs = np.zeros(len(labels))
+
+                draw_hand_landmarks(frame, detection_result)
 
             except Exception as exc:
                 print(f"Prediction error: {exc}", file=sys.stderr)
                 prediction = "Error"
                 confidence = 0.0
 
+            if bbox is not None:
+                x_min, y_min, x_max, y_max = bbox
+                cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 255), 2)
+
+            box_color = (0, 255, 0) if hand_inside_box and confidence >= CONFIDENCE_THRESHOLD else (0, 165, 255)
+            box_x1, box_y1, box_x2, box_y2 = prediction_box
+            cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
+
             color = (0, 255, 0) if confidence >= CONFIDENCE_THRESHOLD else (0, 165, 255)
-            shown_prediction = prediction if hand_found else "Show your hand"
-            if hand_found and confidence < CONFIDENCE_THRESHOLD:
+            shown_prediction = prediction if hand_inside_box else "Place hand in box"
+            if hand_inside_box and confidence < CONFIDENCE_THRESHOLD:
                 shown_prediction = f"{prediction}?"
 
             cv2.rectangle(frame, (0, 0), (width, 90), (0, 0, 0), -1)
@@ -160,7 +205,7 @@ def main():
 
             top_idx = np.argsort(all_probs)[::-1][:5]
             for i, idx in enumerate(top_idx):
-                label = str(encoder.classes_[idx])
+                label = labels[idx]
                 prob = float(all_probs[idx])
                 bar_y = 105 + i * 26
                 bar_w = int(prob * 180)
@@ -185,7 +230,7 @@ def main():
                 1,
             )
 
-            cv2.imshow("ASL Number Recognition (Landmark)", frame)
+            cv2.imshow("ASL Number Recognition (Landmarks)", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
