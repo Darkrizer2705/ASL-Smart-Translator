@@ -16,7 +16,6 @@ from src.utils.mediapipe_utils import (
 )
 
 NUMBERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-SAMPLES = 200
 FEATURE_COUNT = 63
 OUTPUT_CSV = "datasets/number_landmarks.csv"
 
@@ -133,13 +132,17 @@ def main():
                                 (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 1,
                                 (0, 255, 255), 2)
                     cv2.imshow("Collect Number Landmarks", frame)
-                    if cv2.waitKey(1) & 0xFF == ord(" "):
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord(" "):
                         break
+                    if key == ord("q"):
+                        return
 
                 count = 0
                 print(f"Recording '{number}'...")
+                print("Press SPACE to stop recording this sign, or Q to quit.")
 
-                while count < SAMPLES:
+                while True:
                     ok, frame, features = read_detect_and_draw(
                         cap,
                         hands,
@@ -153,11 +156,18 @@ def main():
                         count += 1
 
                     cv2.rectangle(frame, (0, 0), (frame.shape[1], 70), (0, 0, 0), -1)
-                    cv2.putText(frame, f"Sign '{number}': {count}/{SAMPLES}",
+                    cv2.putText(frame, f"Sign '{number}': {count} samples",
                                 (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.1,
                                 (0, 255, 0), 2)
+                    cv2.putText(frame, "SPACE=Stop | Q=Quit",
+                                (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (200, 200, 200), 2)
                     cv2.imshow("Collect Number Landmarks", frame)
-                    cv2.waitKey(20)
+                    key = cv2.waitKey(20) & 0xFF
+                    if key == ord(" "):
+                        break
+                    if key == ord("q"):
+                        return
 
                 print(f"'{number}' done - {count} samples")
     finally:
