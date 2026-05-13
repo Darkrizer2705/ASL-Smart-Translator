@@ -25,4 +25,4 @@ print(f"✅ Accuracy: {accuracy_score(y_test, y_pred)*100:.2f}%")
 
 with open("models/alphabet_landmark_classifier.pkl", "wb") as f:
     pickle.dump({"model": model, "encoder": le}, f)
-print("🎉 Saved: models/alphabet_landmark_classifier.pkl")
+print(" Saved: models/alphabet_landmark_classifier.pkl")
