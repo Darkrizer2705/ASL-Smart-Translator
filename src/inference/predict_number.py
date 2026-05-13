@@ -17,8 +17,8 @@ from src.utils.mediapipe_utils import (
 )
 
 
-CNN_MODEL = "models/number_cnn.h5"
-CLASS_INDICES_FILE = "models/number_classes.json"
+CNN_MODEL = ROOT_DIR / "models" / "number_cnn.h5"
+CLASS_INDICES_FILE = ROOT_DIR / "models" / "number_classes.json"
 IMG_SIZE = (64, 64)
 STABLE_THRESHOLD = 15
 CONFIDENCE_THRESHOLD = 0.6
@@ -27,11 +27,13 @@ CONFIDENCE_THRESHOLD = 0.6
 # ── Check models exist ─────────────────────────────
 if not os.path.exists(CNN_MODEL):
     print("❌ CNN model not found.")
+    print(f"Expected it at: {CNN_MODEL}")
     print("Run: python src/models/train_numbers.py first")
     sys.exit(1)
 
 if not os.path.exists(CLASS_INDICES_FILE):
     print("❌ Class indices file not found.")
+    print(f"Expected it at: {CLASS_INDICES_FILE}")
     print("Run: python src/models/train_numbers.py first")
     sys.exit(1)
 

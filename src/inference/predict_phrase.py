@@ -11,7 +11,14 @@ sys.path.insert(0, str(ROOT_DIR))
 
 # ── Load Model ─────────────────────────────────────
 print("Loading phrase model...")
-with open("models/phrase_classifier.pkl", "rb") as f:
+PHRASE_MODEL = ROOT_DIR / "models" / "phrase_classifier.pkl"
+if not PHRASE_MODEL.exists():
+    print("Phrase model not found.")
+    print(f"Expected it at: {PHRASE_MODEL}")
+    print("Run: python src/models/train_phrases.py first")
+    sys.exit(1)
+
+with open(PHRASE_MODEL, "rb") as f:
     data = pickle.load(f)
     model   = data["model"]
     encoder = data["encoder"]

@@ -16,7 +16,7 @@ from src.utils.mediapipe_utils import (
 )
 
 
-LANDMARK_MODEL = "models/alphabet_landmark_classifier.pkl"
+LANDMARK_MODEL = ROOT_DIR / "models" / "alphabet_landmark_classifier.pkl"
 STABLE_THRESHOLD = 20
 CONFIDENCE_THRESHOLD = 0.65
 
@@ -47,6 +47,7 @@ def open_camera(camera_index=0):
 
 if not os.path.exists(LANDMARK_MODEL):
     print("Landmark alphabet model not found.")
+    print(f"Expected it at: {LANDMARK_MODEL}")
     print("Run: python src/models/train_alphabet_landmarks.py first")
     sys.exit(1)
 
