@@ -16,7 +16,6 @@ from src.utils.mediapipe_utils import (
 )
 
 ALPHABETS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ["del", "space", "nothing"]
-SAMPLES = 100
 FEATURE_COUNT = 63
 OUTPUT_CSV = "datasets/alphabet_landmarks.csv"
 
@@ -116,13 +115,17 @@ def main():
                                 (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
                                 (0, 255, 255), 2)
                     cv2.imshow("Collect Alphabet Data", frame)
-                    if cv2.waitKey(1) & 0xFF == ord(" "):
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord(" "):
                         break
+                    if key == ord("q"):
+                        return
 
                 count = 0
                 print(f"Recording {letter}...")
+                print("Press SPACE to stop recording this sign, or Q to quit.")
 
-                while count < SAMPLES:
+                while True:
                     ok, frame, features = read_detect_and_draw(cap, hands)
                     if not ok:
                         return
@@ -134,11 +137,18 @@ def main():
                         writer.writerow(([0.0] * FEATURE_COUNT) + [letter])
                         count += 1
 
-                    cv2.putText(frame, f"Recording '{letter}': {count}/{SAMPLES}",
+                    cv2.putText(frame, f"Recording '{letter}': {count} samples",
                                 (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
                                 (0, 255, 0), 2)
+                    cv2.putText(frame, "SPACE=Stop | Q=Quit",
+                                (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (200, 200, 200), 2)
                     cv2.imshow("Collect Alphabet Data", frame)
-                    cv2.waitKey(30)
+                    key = cv2.waitKey(30) & 0xFF
+                    if key == ord(" "):
+                        break
+                    if key == ord("q"):
+                        return
 
                 print(f"{letter} done ({count} samples)")
     finally:

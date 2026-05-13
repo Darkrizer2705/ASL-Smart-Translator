@@ -50,7 +50,7 @@ def collect_with_variation():
     print("  1. Do NOT hold your hand in the same position")
     print("  2. MOVE your hand naturally while doing the sign")
     print("  3. Make different hand shapes and positions")
-    print("  4. Collect at least 100-200 samples per phrase")
+    print("  4. Collect as many samples as you want for each phrase")
     print("  5. The detector captures up to TWO hands; each hand is saved as a separate sample")
     print("="*70)
     
