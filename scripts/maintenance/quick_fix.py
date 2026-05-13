@@ -58,7 +58,7 @@ if step1_success:
     # Step 2: Retrain
     step2_success = run_step(
         "Retrain model with new data",
-        "python src/models/train_phrases_improved.py"
+        "python src/models/train_phrases.py"
     )
     
     if step2_success:
