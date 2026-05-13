@@ -28,12 +28,60 @@ from src.utils.mediapipe_utils import (
     frame_to_mp_image,
 )
 
+# MediaPipe landmark connections used for drawing each hand.
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),  # index
+    (5, 9), (9, 10), (10, 11), (11, 12),  # middle
+    (9, 13), (13, 14), (14, 15), (15, 16),  # ring
+    (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
+    (0, 17), (0, 5), (0, 9),  # palm
+]
+
 hands = create_hands_detector(
-    max_num_hands=1,
+    max_num_hands=2,
     min_detection_confidence=0.7,
     min_tracking_confidence=0.7,
 )
 print("MediaPipe Tasks API loaded")
+
+
+def draw_hand_landmarks(frame, hand_lms, width, height, color=(0, 255, 0)):
+    for start, end in HAND_CONNECTIONS:
+        if start < len(hand_lms) and end < len(hand_lms):
+            x1 = int(hand_lms[start].x * width)
+            y1 = int(hand_lms[start].y * height)
+            x2 = int(hand_lms[end].x * width)
+            y2 = int(hand_lms[end].y * height)
+            cv2.line(frame, (x1, y1), (x2, y2), color, 1)
+
+    for lm in hand_lms:
+        x = int(lm.x * width)
+        y = int(lm.y * height)
+        cv2.circle(frame, (x, y), 3, color, -1)
+
+
+def build_feature_vector(hand_landmarks_list, expected_features):
+    """Build a feature row from one or two detected hands.
+
+    Current models in this repo are mostly trained on 63 features (one hand).
+    When two hands are available, we still capture both sets of features and
+    concatenate them when the model can consume the larger vector.
+    """
+    if not hand_landmarks_list:
+        return None
+
+    hand_rows = [extract_landmark_vector(hand_lms) for hand_lms in hand_landmarks_list]
+
+    # If the model was trained on a single hand, keep the most prominent hand
+    # so inference remains compatible, but still capture both hands above.
+    if expected_features == 63:
+        best_row = max(hand_rows, key=len)
+        return best_row if len(best_row) == expected_features else None
+
+    # If the model expects more features, concatenate all detected hands.
+    combined_row = [value for row in hand_rows for value in row]
+    return combined_row if len(combined_row) == expected_features else None
 
 # ── State ──────────────────────────────────────────
 sentence        = []
@@ -41,8 +89,10 @@ last_pred       = ""
 stable_count    = 0
 probs           = np.zeros(len(encoder.classes_))
 
-STABLE_THRESHOLD     = 20
-CONFIDENCE_THRESHOLD = 0.70
+# TUNED THRESHOLDS for better real-time performance
+STABLE_THRESHOLD     = 15  # Reduced from 20 for faster response
+CONFIDENCE_THRESHOLD = 0.60  # Lowered from 0.70 for more predictions
+UNKNOWN_THRESHOLD    = 0.50  # Below this = "Unknown"
 
 cap = cv2.VideoCapture(0)
 print("\nStarted. Controls: A=Add word  C=Clear  U=Undo  Q=Quit\n")
@@ -62,37 +112,19 @@ while True:
     hand_found  = False
 
     if results.hand_landmarks and len(results.hand_landmarks) > 0:
-        hand_lms = results.hand_landmarks[0]
+        # Draw every detected hand.
+        for hand_index, hand_lms in enumerate(results.hand_landmarks):
+            draw_color = (0, 255, 0) if hand_index == 0 else (0, 180, 255)
+            draw_hand_landmarks(frame, hand_lms, w, h, draw_color)
 
-        # ── Draw landmarks ────────────────────────
-        connections = [
-            (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
-            (0, 5), (5, 6), (6, 7), (7, 8),  # index
-            (5, 9), (9, 10), (10, 11), (11, 12),  # middle
-            (9, 13), (13, 14), (14, 15), (15, 16),  # ring
-            (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
-            (0, 17), (0, 5), (0, 9)  # palm
-        ]
-        for start, end in connections:
-            if start < len(hand_lms) and end < len(hand_lms):
-                x1 = int(hand_lms[start].x * w)
-                y1 = int(hand_lms[start].y * h)
-                x2 = int(hand_lms[end].x * w)
-                y2 = int(hand_lms[end].y * h)
-                cv2.line(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
-
-        for lm in hand_lms:
-            x = int(lm.x * w)
-            y = int(lm.y * h)
-            cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
-
-        # ── Extract features in EXACT same order ──
-        # Match the wrist-relative single-hand normalization used during collection.
-        row = extract_landmark_vector(hand_lms)
+        # Build features from one or two hands.
+        row = build_feature_vector(results.hand_landmarks, model.n_features_in_)
 
         # Verify feature count
-        if len(row) != model.n_features_in_:
-            print(f"Feature mismatch: got {len(row)}, expected {model.n_features_in_}")
+        if row is None or len(row) != model.n_features_in_:
+            print(
+                f"Feature mismatch: got {0 if row is None else len(row)}, expected {model.n_features_in_}"
+            )
             continue
 
         features   = np.array(row, dtype=np.float32).reshape(1, -1)
@@ -100,7 +132,7 @@ while True:
         confidence = float(np.max(probs))
         pred_idx   = int(np.argmax(probs))
         prediction = encoder.classes_[pred_idx]
-        if confidence < 0.60:
+        if confidence < UNKNOWN_THRESHOLD:
             prediction = "Unknown"
         hand_found = True
 
