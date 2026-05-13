@@ -21,7 +21,7 @@ model = RandomForestClassifier(n_estimators=300, max_depth=25, min_samples_split
                                 random_state=42, n_jobs=-1, verbose=1)
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
-print(f"✅ Accuracy: {accuracy_score(y_test, y_pred)*100:.2f}%")
+print(f" Accuracy: {accuracy_score(y_test, y_pred)*100:.2f}%")
 
 with open("models/alphabet_landmark_classifier.pkl", "wb") as f:
     pickle.dump({"model": model, "encoder": le}, f)
