@@ -15,7 +15,7 @@ import cv2
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
-from config import PHRASE_CSV, WLASL_DIR
+from src.data.config import PHRASE_CSV, WLASL_DIR
 from src.utils.mediapipe_utils import (
     create_hands_detector,
     extract_landmark_vector,
@@ -106,12 +106,13 @@ def main() -> None:
     videos_dir = wlasl_root / "videos"
     index = load_wlasl_index()
 
-    with output_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        header = [f"{axis}{i}" for i in range(21) for axis in ["x", "y", "z"]] + ["label"]
-        writer.writerow(header)
+    hands = create_hands_detector(max_num_hands=1)
+    try:
+        with output_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            header = [f"{axis}{i}" for i in range(21) for axis in ["x", "y", "z"]] + ["label"]
+            writer.writerow(header)
 
-        with create_hands_detector(max_num_hands=1) as hands:
             for phrase in PHRASES:
                 gloss = GLOSS_ALIASES.get(phrase, phrase)
                 instances = index.get(gloss)
@@ -133,6 +134,8 @@ def main() -> None:
                 if missing_videos:
                     status += f" ({missing_videos} videos missing)"
                 print(status)
+    finally:
+        hands.close()
 
     print(f"Saved to {output_path}")
 

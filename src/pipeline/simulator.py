@@ -23,9 +23,15 @@
 #   - quit                     → exit
 # -------------------------------------------------------
 
-from smoother import Smoother
-from sentence_builder import SentenceBuilder
-from llm_refiner import LLMRefiner
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR))
+
+from src.pipeline.smoother import Smoother
+from src.pipeline.sentence_builder import SentenceBuilder
+from src.pipeline.llm_refiner import LLMRefiner
 
 def run_simulator():
     smoother         = Smoother(window_size=10, min_count=7, min_confidence=0.80)

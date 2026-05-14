@@ -13,7 +13,8 @@ pandas
 scikit-learn==1.6.1
 
 # LLM + Translation
-anthropic
+google-generativeai
+python-dotenv
 deep-translator
 
 # App

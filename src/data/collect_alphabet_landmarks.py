@@ -17,7 +17,7 @@ from src.utils.mediapipe_utils import (
 
 ALPHABETS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ["del", "space", "nothing"]
 FEATURE_COUNT = 63
-OUTPUT_CSV = "datasets/alphabet_landmarks.csv"
+OUTPUT_CSV = str(ROOT_DIR / "datasets" / "alphabet_landmarks.csv")
 
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),

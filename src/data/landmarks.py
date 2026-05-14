@@ -1,23 +1,35 @@
-import cv2
-import mediapipe as mp
-import numpy as np
-import os
-import pandas as pd
+"""
+landmarks.py — Extract hand landmarks from gesture videos and save to CSV.
 
-# Initialize MediaPipe
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(
-    static_image_mode=False,
-    max_num_hands=1,
-    min_detection_confidence=0.5
+Uses the same MediaPipe Tasks API as the rest of the project (mediapipe_utils).
+Run from the project root:
+    python -m src.data.landmarks
+"""
+from __future__ import annotations
+
+import csv
+import sys
+from pathlib import Path
+
+import cv2
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR))
+
+from src.utils.mediapipe_utils import (
+    create_hands_detector,
+    extract_landmark_vector,
+    frame_to_mp_image,
 )
 
-DATA = []
+DATASET_PATH = ROOT_DIR / "datasets" / "wlasl"
+OUTPUT_CSV   = ROOT_DIR / "datasets" / "gesture_dataset.csv"
 
-# -------- FUNCTION TO PROCESS EACH VIDEO --------
-def extract_from_video(video_path, label):
-    cap = cv2.VideoCapture(video_path)
 
+def extract_from_video(video_path: Path, label: str, hands, writer: csv.writer) -> int:
+    """Extract per-frame landmarks from a video and write rows to CSV."""
+    cap = cv2.VideoCapture(str(video_path))
+    count = 0
     frame_count = 0
 
     while cap.isOpened():
@@ -26,77 +38,65 @@ def extract_from_video(video_path, label):
             break
 
         frame_count += 1
-
-        # OPTIONAL: skip frames to reduce duplicates
+        # Skip every other frame to reduce duplicates
         if frame_count % 2 != 0:
             continue
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        result = hands.process(frame_rgb)
+        results = hands.detect(frame_to_mp_image(frame))
 
-        if result.multi_hand_landmarks:
-            for hand_landmarks in result.multi_hand_landmarks:
-
-                landmarks = []
-
-                for lm in hand_landmarks.landmark:
-                    landmarks.append(lm.x)
-                    landmarks.append(lm.y)
-                    landmarks.append(lm.z)
-
-                # -------- NORMALIZATION --------
-                base_x, base_y, base_z = landmarks[0], landmarks[1], landmarks[2]
-
-                normalized = []
-                for i in range(0, len(landmarks), 3):
-                        normalized.append(landmarks[i] - base_x)
-                        normalized.append(landmarks[i+1] - base_y)
-                        normalized.append(landmarks[i+2] - base_z)
-
-                # Add label at the end
-                normalized.append(label)
-
-                DATA.append(normalized)
+        if results.hand_landmarks:
+            for hand_lms in results.hand_landmarks:
+                normalized = extract_landmark_vector(hand_lms)
+                if len(normalized) == 63:
+                    writer.writerow(normalized + [label])
+                    count += 1
 
     cap.release()
+    return count
 
 
-# -------- MAIN LOOP --------
-dataset_path = "gesture_datapath"
+def main() -> None:
+    if not DATASET_PATH.exists():
+        print(f"Dataset path not found: {DATASET_PATH}")
+        print("Place your gesture video folders under datasets/wlasl/")
+        sys.exit(1)
 
-for category in os.listdir(dataset_path):
-    category_path = os.path.join(dataset_path, category)
+    OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
 
-    if not os.path.isdir(category_path):
-        continue
+    # Build column headers: x0,y0,z0, x1,y1,z1, ... x20,y20,z20, label
+    header = []
+    for i in range(21):
+        header.extend([f"x{i}", f"y{i}", f"z{i}"])
+    header.append("label")
 
-    for label in os.listdir(category_path):
-        gesture_path = os.path.join(category_path, label)
+    hands = create_hands_detector(max_num_hands=1, min_detection_confidence=0.5)
+    total = 0
 
-        if not os.path.isdir(gesture_path):
-            continue
+    try:
+        with OUTPUT_CSV.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
 
-        print(f"Processing gesture: {label}")
+            for category_dir in sorted(DATASET_PATH.iterdir()):
+                if not category_dir.is_dir():
+                    continue
 
-        for video in os.listdir(gesture_path):
-            video_path = os.path.join(gesture_path, video)
+                for gesture_dir in sorted(category_dir.iterdir()):
+                    if not gesture_dir.is_dir():
+                        continue
 
-            if video.endswith(".mp4") or video.endswith(".avi"):
-                extract_from_video(video_path, label)
+                    label = gesture_dir.name
+                    print(f"Processing gesture: {label}")
+
+                    for video_file in gesture_dir.iterdir():
+                        if video_file.suffix.lower() in (".mp4", ".avi"):
+                            n = extract_from_video(video_file, label, hands, writer)
+                            total += n
+    finally:
+        hands.close()
+
+    print(f"\n✅ Dataset created: {OUTPUT_CSV}  ({total} samples)")
 
 
-# -------- SAVE TO CSV --------
-columns = []
-
-for i in range(21):
-    columns.append(f"x{i}")
-    columns.append(f"y{i}")
-    columns.append(f"z{i}")
-
-columns.append("label")
-
-df = pd.DataFrame(DATA, columns=columns)
-
-df.to_csv("gesture_dataset.csv", index=False)
-
-print("✅ Dataset created: gesture_dataset.csv")
+if __name__ == "__main__":
+    main()

@@ -43,7 +43,8 @@ LANDMARK_DIMS   = 3         # x, y, z
 FEATURE_SIZE    = NUM_LANDMARKS * LANDMARK_DIMS   # = 63
 
 # ── LLM ────────────────────────────────────────────
-LLM_MODEL       = "claude-sonnet-4-20250514"
+# Model used by src/pipeline/llm_refiner.py (Gemini)
+LLM_MODEL       = "gemini-2.0-flash"
 MAX_TOKENS      = 200
 
 # ── Translation ────────────────────────────────────

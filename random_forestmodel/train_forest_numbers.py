@@ -6,7 +6,7 @@ import pickle
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from src.data.config import BATCH_SIZE, EPOCHS, IMG_SIZE, NUMBER_MODEL, NUMBERS_TRAIN_DIR
@@ -15,7 +15,7 @@ NUMBER_LANDMARKS_CSV = ROOT_DIR / "datasets" / "number_landmarks.csv"
 NUMBER_LANDMARK_MODEL = ROOT_DIR / "models" / "number_landmark_classifier.pkl"
 
 from src.utils.metrics import save_model_metrics
-RESULTS_DIR = ROOT_DIR / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "metric"
 
 
 def csv_has_data_rows(csv_path: Path) -> bool:
@@ -49,89 +49,73 @@ def train_number_model(data_dir: Path, model_path: Path) -> None:
             "Use --mode landmarks, or pass --image-data-dir with the correct folder."
         )
 
-    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-    import tensorflow as tf
-    from tensorflow.keras import layers, models
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
+    import cv2
+    import numpy as np
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import accuracy_score, classification_report
+    from sklearn.model_selection import train_test_split
+    import pickle
 
     print("Loading number images...")
-    datagen = ImageDataGenerator(
-        rescale=1.0 / 255.0,
-        validation_split=0.2,
-        rotation_range=10,
-        zoom_range=0.1,
-    )
+    X = []
+    y = []
+    
+    classes_list = []
+    for class_dir in sorted(data_dir.iterdir()):
+        if class_dir.is_dir():
+            classes_list.append(class_dir.name)
+            for img_path in class_dir.glob("*.*"):
+                if img_path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
+                    img = cv2.imread(str(img_path))
+                    if img is not None:
+                        img = cv2.resize(img, IMG_SIZE)
+                        X.append(img.flatten() / 255.0)
+                        y.append(class_dir.name)
 
-    train_gen = datagen.flow_from_directory(
-        str(data_dir),
-        target_size=IMG_SIZE,
-        batch_size=BATCH_SIZE,
-        class_mode="categorical",
-        subset="training",
-    )
-    val_gen = datagen.flow_from_directory(
-        str(data_dir),
-        target_size=IMG_SIZE,
-        batch_size=BATCH_SIZE,
-        class_mode="categorical",
-        subset="validation",
-    )
-
-    num_classes = len(train_gen.class_indices)
+    X = np.array(X)
+    y = np.array(y)
+    
+    num_classes = len(classes_list)
     print(f"Classes found: {num_classes}")
+
+    class_indices = {cls_name: i for i, cls_name in enumerate(classes_list)}
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
     class_index_path = model_path.with_name("number_classes.json")
     with class_index_path.open("w", encoding="utf-8") as file_handle:
-        json.dump(train_gen.class_indices, file_handle, indent=2)
+        json.dump(class_indices, file_handle, indent=2)
     print(f"Saved class indices to: {class_index_path}")
+    
+    y_encoded = np.array([class_indices[label] for label in y])
 
-    model = models.Sequential(
-        [
-            layers.Conv2D(32, (3, 3), activation="relu", input_shape=(*IMG_SIZE, 3)),
-            layers.MaxPooling2D(2, 2),
-            layers.Conv2D(64, (3, 3), activation="relu"),
-            layers.MaxPooling2D(2, 2),
-            layers.Conv2D(128, (3, 3), activation="relu"),
-            layers.MaxPooling2D(2, 2),
-            layers.Flatten(),
-            layers.Dense(256, activation="relu"),
-            layers.Dropout(0.5),
-            layers.Dense(num_classes, activation="softmax"),
-        ]
+    x_train, x_test, y_train, y_test = train_test_split(
+        X,
+        y_encoded,
+        test_size=0.2,
+        random_state=42,
+        stratify=y_encoded,
     )
 
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    model.summary()
-
-    print("Training number CNN...")
-    model.fit(
-        train_gen,
-        validation_data=val_gen,
-        epochs=EPOCHS,
-        callbacks=[
-            tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),
-            tf.keras.callbacks.ModelCheckpoint(str(model_path), save_best_only=True, verbose=1),
-        ],
+    print("Training RandomForest classifier on images...")
+    model = RandomForestClassifier(
+        n_estimators=100,
+        random_state=42,
+        n_jobs=-1,
     )
+    model.fit(x_train, y_train)
 
+    y_pred = model.predict(x_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"\nAccuracy: {accuracy * 100:.2f}%")
+    print(classification_report(y_test, y_pred, target_names=classes_list))
+
+    with model_path.open("wb") as file_handle:
+        pickle.dump({"model": model, "classes": class_indices}, file_handle)
+    
     print(f"Saved model to: {model_path}")
 
-    print("\nEvaluating CNN model to save metrics...")
-    import numpy as np
-    eval_gen = datagen.flow_from_directory(
-        str(data_dir),
-        target_size=IMG_SIZE,
-        batch_size=BATCH_SIZE,
-        class_mode="categorical",
-        subset="validation",
-        shuffle=False,
-    )
-    y_pred_prob = model.predict(eval_gen)
-    y_pred = np.argmax(y_pred_prob, axis=-1)
-    y_true = eval_gen.classes
-    classes_list = list(eval_gen.class_indices.keys())
-    save_model_metrics(y_true, y_pred, classes_list, "number_cnn", RESULTS_DIR)
+    print("\nEvaluating model to save metrics...")
+    save_model_metrics(y_test, y_pred, classes_list, "number_rf_image", RESULTS_DIR)
 
 
 def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
@@ -142,7 +126,7 @@ def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
         )
 
     import pandas as pd
-    import xgboost as xgb
+    from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import accuracy_score, classification_report
     from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import LabelEncoder
@@ -179,18 +163,11 @@ def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
     print(f"Train: {len(x_train)} | Test: {len(x_test)}")
 
     print("\nTraining number landmark classifier...")
-    model = xgb.XGBClassifier(
+    model = RandomForestClassifier(
         n_estimators=200,
         max_depth=8,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        objective="multi:softprob",
         random_state=42,
         n_jobs=-1,
-        verbosity=1,
-        use_label_encoder=False,
-        eval_metric="mlogloss",
     )
     model.fit(x_train, y_train)
 
