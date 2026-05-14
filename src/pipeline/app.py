@@ -1,7 +1,7 @@
 # src/pipeline/app.py
 # -------------------------------------------------------
 # Streamlit UI for the ASL Translator
-# Uses OpenCV directly (no streamlit-webrtc needed)
+# Supports three recognition modes: Phrase / Alphabet / Number
 #
 # How to run (from your git repo root):
 #   streamlit run src/pipeline/app.py
@@ -37,9 +37,23 @@ st.set_page_config(
 # ── Custom CSS ───────────────────────────────────────
 st.markdown("""
 <style>
-    .title { text-align: center; font-size: 2.5rem; font-weight: bold; color: #ffffff; margin-bottom: 0; }
-    .subtitle { text-align: center; color: #888; margin-bottom: 1rem; }
-    .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    .title { text-align: center; font-size: 2.5rem; font-weight: 700; color: #ffffff; margin-bottom: 0; }
+    .subtitle { text-align: center; color: #888; margin-bottom: 1rem; font-size: 1rem; }
+    .mode-badge {
+        display: inline-block;
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+    .mode-phrase   { background: #1a3a4a; color: #00d4ff; border: 1px solid #00d4ff; }
+    .mode-alphabet { background: #1a3a2a; color: #66ff88; border: 1px solid #66ff88; }
+    .mode-number   { background: #3a2a1a; color: #ffaa33; border: 1px solid #ffaa33; }
+    .label { font-size: 0.72rem; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
     .value-box {
         background: #1e2130;
         border-radius: 10px;
@@ -48,21 +62,29 @@ st.markdown("""
         border-left: 4px solid #4CAF50;
         min-height: 55px;
     }
-    .value-box.hindi { border-left-color: #FF9800; }
-    .value-box.raw   { border-left-color: #2196F3; }
-    .value-box.pred  { border-left-color: #9C27B0; }
+    .value-box.hindi  { border-left-color: #FF9800; }
+    .value-box.raw    { border-left-color: #2196F3; }
+    .value-box.pred   { border-left-color: #9C27B0; }
+    .value-box.spell  { border-left-color: #66ff88; background: #111e14; }
     .value-text { font-size: 1.15rem; color: #ffffff; font-weight: 500; }
     .confidence { font-size: 0.8rem; color: #4CAF50; margin-top: 3px; }
+    .spell-text { font-size: 1.4rem; color: #66ff88; font-weight: 700; letter-spacing: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Load model once (cached so it doesn't reload every frame) ──
+
+# ── Cached resource loaders ──────────────────────────
 @st.cache_resource
-def load_phrase_model():
-    model_path = ROOT_DIR / "models" / "phrase_classifier.pkl"
-    with open(model_path, "rb") as f:
-        data = pickle.load(f)
-    return data["model"], data["encoder"]
+def load_all_models():
+    def _load(path):
+        with open(path, "rb") as f:
+            d = pickle.load(f)
+        return d["model"], d["encoder"]
+
+    pm, pe = _load(ROOT_DIR / "models" / "phrase_classifier.pkl")
+    am, ae = _load(ROOT_DIR / "models" / "alphabet_landmark_classifier.pkl")
+    nm, ne = _load(ROOT_DIR / "models" / "number_landmark_classifier.pkl")
+    return (pm, pe), (am, ae), (nm, ne)
 
 @st.cache_resource
 def load_hands():
@@ -76,9 +98,22 @@ def load_hands():
 def load_refiner():
     return LLMRefiner()
 
-model, encoder = load_phrase_model()
-hands          = load_hands()
-refiner        = load_refiner()
+(phrase_model, phrase_enc), (alpha_model, alpha_enc), (num_model, num_enc) = load_all_models()
+hands   = load_hands()
+refiner = load_refiner()
+
+MODELS = {
+    "Phrase":   (phrase_model, phrase_enc),
+    "Alphabet": (alpha_model,  alpha_enc),
+    "Number":   (num_model,    num_enc),
+}
+MODE_BADGE = {
+    "Phrase":   "mode-phrase",
+    "Alphabet": "mode-alphabet",
+    "Number":   "mode-number",
+}
+MODE_ICON = {"Phrase": "💬", "Alphabet": "🔤", "Number": "🔢"}
+
 
 # ── Feature builder ──────────────────────────────────
 def build_feature_vector(hand_landmarks_list, expected_features):
@@ -91,53 +126,96 @@ def build_feature_vector(hand_landmarks_list, expected_features):
     combined = [v for row in hand_rows for v in row]
     return combined if len(combined) == expected_features else None
 
-# ── Session state (persists across reruns) ───────────
-if "smoother"         not in st.session_state:
-    st.session_state.smoother         = Smoother(window_size=10, min_count=5, min_confidence=0.60)
-if "sentence_builder" not in st.session_state:
-    st.session_state.sentence_builder = SentenceBuilder()
-if "sentence"         not in st.session_state:
-    st.session_state.sentence         = ""
-if "english"          not in st.session_state:
-    st.session_state.english          = ""
-if "hindi"            not in st.session_state:
-    st.session_state.hindi            = ""
-if "running"          not in st.session_state:
-    st.session_state.running          = False
+
+# ── Session state ────────────────────────────────────
+defaults = {
+    "smoother":         Smoother(window_size=10, min_count=5, min_confidence=0.60),
+    "sentence_builder": SentenceBuilder(),
+    "sentence":         "",
+    "english":          "",
+    "hindi":            "",
+    "running":          False,
+    "mode":             "Phrase",
+    "current_word":     [],      # alphabet letter buffer
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 smoother         = st.session_state.smoother
 sentence_builder = st.session_state.sentence_builder
+
 
 # ── Title ────────────────────────────────────────────
 st.markdown('<div class="title">🤟 ASL Smart Translator</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Sign → Sentence → English → Hindi</div>', unsafe_allow_html=True)
 st.markdown("---")
 
-# ── Layout: camera left, outputs right ───────────────
+# ── Mode selector ────────────────────────────────────
+col_m1, col_m2, col_m3, col_m4 = st.columns([1, 1, 1, 2])
+with col_m1:
+    if st.button("💬 Phrase Mode",   use_container_width=True,
+                 type="primary" if st.session_state.mode == "Phrase" else "secondary"):
+        if st.session_state.mode != "Phrase":
+            st.session_state.mode = "Phrase"
+            smoother.reset()
+            st.session_state.current_word = []
+with col_m2:
+    if st.button("🔤 Alphabet Mode", use_container_width=True,
+                 type="primary" if st.session_state.mode == "Alphabet" else "secondary"):
+        if st.session_state.mode != "Alphabet":
+            st.session_state.mode = "Alphabet"
+            smoother.reset()
+            st.session_state.current_word = []
+with col_m3:
+    if st.button("🔢 Number Mode",   use_container_width=True,
+                 type="primary" if st.session_state.mode == "Number" else "secondary"):
+        if st.session_state.mode != "Number":
+            st.session_state.mode = "Number"
+            smoother.reset()
+            st.session_state.current_word = []
+
+mode         = st.session_state.mode
+model, enc   = MODELS[mode]
+badge_class  = MODE_BADGE[mode]
+
+st.markdown(f'<span class="mode-badge {badge_class}">{MODE_ICON[mode]} {mode.upper()} MODE</span>',
+            unsafe_allow_html=True)
+
+# ── Layout ───────────────────────────────────────────
 col_cam, col_out = st.columns([3, 2])
 
 with col_cam:
     st.markdown("### 📷 Camera Feed")
-    frame_placeholder = st.empty()  # this is where camera frames go
+    frame_placeholder = st.empty()
 
 with col_out:
     st.markdown("### 📊 Live Output")
 
-    pred_placeholder = st.empty()
-    raw_placeholder  = st.empty()
-    eng_placeholder  = st.empty()
-    hin_placeholder  = st.empty()
+    pred_placeholder  = st.empty()
+    spell_placeholder = st.empty()   # only visible in Alphabet mode
+    raw_placeholder   = st.empty()
+    eng_placeholder   = st.empty()
+    hin_placeholder   = st.empty()
 
     st.markdown("---")
 
+    # Action buttons
     btn1, btn2 = st.columns(2)
     with btn1:
         refine_btn = st.button("✨ Refine with Gemini", use_container_width=True)
     with btn2:
-        clear_btn  = st.button("🗑️ Clear", use_container_width=True)
+        clear_btn  = st.button("🗑️ Clear",              use_container_width=True)
 
-    undo_btn = st.button("↩️ Undo Last Word", use_container_width=True)
-    stop_btn = st.button("⏹️ Stop Camera", use_container_width=True)
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        undo_btn  = st.button("↩️ Undo Last Word",    use_container_width=True)
+    with col_u2:
+        commit_btn = st.button("✅ Commit Word (A→Z)", use_container_width=True,
+                               help="Alphabet mode: commit the current spelling buffer as a word")
+
+    stop_btn  = st.button("⏹️ Stop Camera", use_container_width=True)
+
 
 # ── Button actions ───────────────────────────────────
 if refine_btn:
@@ -153,35 +231,61 @@ if refine_btn:
 if clear_btn:
     sentence_builder.reset()
     smoother.reset()
-    st.session_state.sentence = ""
-    st.session_state.english  = ""
-    st.session_state.hindi    = ""
+    st.session_state.sentence     = ""
+    st.session_state.english      = ""
+    st.session_state.hindi        = ""
+    st.session_state.current_word = []
 
 if undo_btn:
-    current = sentence_builder.get().strip()
-    words   = current.split()
-    if words:
-        words.pop()
-        sentence_builder.reset()
-        for w in words:
-            sentence_builder.add(w)
-            sentence_builder.add("space")
-        st.session_state.sentence = sentence_builder.get()
+    if mode == "Alphabet" and st.session_state.current_word:
+        st.session_state.current_word.pop()
+    else:
+        current = sentence_builder.get().strip()
+        words   = current.split()
+        if words:
+            words.pop()
+            sentence_builder.reset()
+            for i, w in enumerate(words):
+                sentence_builder.add(w)
+                if i < len(words) - 1:
+                    sentence_builder.add("space")
+            st.session_state.sentence = sentence_builder.get()
+
+if commit_btn and mode == "Alphabet" and st.session_state.current_word:
+    word = "".join(st.session_state.current_word)
+    sentence_builder.add(word)
+    sentence_builder.add("space")
+    st.session_state.sentence     = sentence_builder.get()
+    st.session_state.current_word = []
+    st.session_state.english      = ""
+    st.session_state.hindi        = ""
 
 if stop_btn:
     st.session_state.running = False
 
-# ── Helper to update output panels ───────────────────
+
+# ── Output panel helper ──────────────────────────────
 def update_outputs(prediction, confidence, hand_found):
     pred_display = prediction.upper() if hand_found and prediction else "Waiting for hand..."
     conf_display = f"{confidence:.0%} confidence" if hand_found and prediction else ""
 
     pred_placeholder.markdown(f"""
     <div class="value-box pred">
-        <div class="label">Current Prediction</div>
+        <div class="label">Current Prediction — {mode} Mode</div>
         <div class="value-text">{pred_display}</div>
         <div class="confidence">{conf_display}</div>
     </div>""", unsafe_allow_html=True)
+
+    # Alphabet spelling buffer
+    if mode == "Alphabet":
+        spell_word = "".join(st.session_state.current_word) or "—"
+        spell_placeholder.markdown(f"""
+    <div class="value-box spell">
+        <div class="label">✏️ Currently spelling</div>
+        <div class="spell-text">{spell_word}</div>
+    </div>""", unsafe_allow_html=True)
+    else:
+        spell_placeholder.empty()
 
     raw_display = st.session_state.sentence.strip() or "Start signing..."
     raw_placeholder.markdown(f"""
@@ -202,60 +306,94 @@ def update_outputs(prediction, confidence, hand_found):
         <div class="value-text">{st.session_state.hindi or "—"}</div>
     </div>""", unsafe_allow_html=True)
 
+
 # ── Camera loop ──────────────────────────────────────
-update_outputs("", 0.0, False)  # show initial state
+update_outputs("", 0.0, False)
 
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    st.error("Could not open camera. Close other apps using it and refresh.")
-else:
+_, col_start, _ = st.columns([1, 2, 1])
+with col_start:
+    start_btn = st.button("▶️ Start Camera", use_container_width=True, type="primary")
+
+if start_btn:
     st.session_state.running = True
-    try:
-        while st.session_state.running:
-            ret, frame = cap.read()
-            if not ret:
-                break
 
-            frame   = cv2.flip(frame, 1)
-            results = hands.detect(frame_to_mp_image(frame))
-            draw_hand_landmarks(frame, results)
+if st.session_state.running:
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        st.error("Could not open camera. Close other apps using it and refresh.")
+        st.session_state.running = False
+    else:
+        try:
+            while st.session_state.running:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            prediction = ""
-            confidence = 0.0
-            hand_found = False
+                frame   = cv2.flip(frame, 1)
+                results = hands.detect(frame_to_mp_image(frame))
+                draw_hand_landmarks(frame, results)
 
-            if results.hand_landmarks:
-                row = build_feature_vector(results.hand_landmarks, model.n_features_in_)
-                if row and len(row) == model.n_features_in_:
-                    features   = np.array(row, dtype=np.float32).reshape(1, -1)
-                    probs      = model.predict_proba(features)[0]
-                    confidence = float(np.max(probs))
-                    pred_idx   = int(np.argmax(probs))
-                    prediction = encoder.classes_[pred_idx]
-                    hand_found = True
+                prediction = ""
+                confidence = 0.0
+                hand_found = False
 
-                    accepted = smoother.add(prediction, confidence)
-                    if accepted:
-                        sentence_builder.add(accepted)
-                        sentence_builder.add("space")
-                        st.session_state.sentence = sentence_builder.get()
-            else:
-                smoother.reset()
+                if results.hand_landmarks:
+                    row = build_feature_vector(results.hand_landmarks, model.n_features_in_)
+                    if row and len(row) == model.n_features_in_:
+                        features   = np.array(row, dtype=np.float32).reshape(1, -1)
+                        probs      = model.predict_proba(features)[0]
+                        confidence = float(np.max(probs))
+                        pred_idx   = int(np.argmax(probs))
+                        prediction = enc.classes_[pred_idx]
+                        hand_found = True
 
-            # Show frame in Streamlit (convert BGR to RGB first)
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                        accepted = smoother.add(prediction, confidence)
+                        if accepted:
+                            if mode == "Phrase":
+                                sentence_builder.add(accepted)
+                                sentence_builder.add("space")
+                                st.session_state.sentence = sentence_builder.get()
+                                st.session_state.english  = ""
+                                st.session_state.hindi    = ""
 
-            # Update output panels
-            update_outputs(prediction, confidence, hand_found)
+                            elif mode == "Alphabet":
+                                if accepted.lower() == "nothing":
+                                    pass
+                                elif accepted.lower() == "del":
+                                    if st.session_state.current_word:
+                                        st.session_state.current_word.pop()
+                                elif accepted.lower() == "space":
+                                    if st.session_state.current_word:
+                                        word = "".join(st.session_state.current_word)
+                                        sentence_builder.add(word)
+                                        sentence_builder.add("space")
+                                        st.session_state.sentence     = sentence_builder.get()
+                                        st.session_state.current_word = []
+                                        st.session_state.english      = ""
+                                        st.session_state.hindi        = ""
+                                else:
+                                    st.session_state.current_word.append(accepted.upper())
 
-    finally:
-        cap.release()
+                            elif mode == "Number":
+                                sentence_builder.add(accepted)
+                                sentence_builder.add("space")
+                                st.session_state.sentence = sentence_builder.get()
+                                st.session_state.english  = ""
+                                st.session_state.hindi    = ""
+                else:
+                    smoother.reset()
+
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                update_outputs(prediction, confidence, hand_found)
+
+        finally:
+            cap.release()
 
 st.markdown("---")
 st.markdown(
     "<div style='text-align:center; color:#555; font-size:0.8rem'>"
-    "ASL Smart Translator · Powered by MediaPipe + Gemini"
+    "ASL Smart Translator · Phrase 💬 · Alphabet 🔤 · Number 🔢 · Powered by MediaPipe + Gemini"
     "</div>",
     unsafe_allow_html=True
 )
