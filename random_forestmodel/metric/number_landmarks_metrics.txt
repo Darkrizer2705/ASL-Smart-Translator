@@ -1,0 +1,20 @@
+Model: number_landmarks
+Accuracy: 99.21%
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           1       0.97      1.00      0.98        58
+          10       1.00      1.00      1.00        72
+           2       1.00      0.94      0.97        47
+           3       0.96      0.99      0.97        69
+           4       1.00      1.00      1.00        42
+           5       1.00      1.00      1.00        50
+           6       1.00      1.00      1.00       101
+           7       1.00      0.98      0.99        66
+           8       1.00      1.00      1.00        70
+           9       1.00      1.00      1.00        55
+
+    accuracy                           0.99       630
+   macro avg       0.99      0.99      0.99       630
+weighted avg       0.99      0.99      0.99       630
