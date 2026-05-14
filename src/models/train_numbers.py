@@ -14,6 +14,9 @@ from src.data.config import BATCH_SIZE, EPOCHS, IMG_SIZE, NUMBER_MODEL, NUMBERS_
 NUMBER_LANDMARKS_CSV = ROOT_DIR / "datasets" / "number_landmarks.csv"
 NUMBER_LANDMARK_MODEL = ROOT_DIR / "models" / "number_landmark_classifier.pkl"
 
+from src.utils.metrics import save_model_metrics
+RESULTS_DIR = ROOT_DIR / "results"
+
 
 def csv_has_data_rows(csv_path: Path) -> bool:
     if not csv_path.exists():
@@ -114,6 +117,22 @@ def train_number_model(data_dir: Path, model_path: Path) -> None:
 
     print(f"Saved model to: {model_path}")
 
+    print("\nEvaluating CNN model to save metrics...")
+    import numpy as np
+    eval_gen = datagen.flow_from_directory(
+        str(data_dir),
+        target_size=IMG_SIZE,
+        batch_size=BATCH_SIZE,
+        class_mode="categorical",
+        subset="validation",
+        shuffle=False,
+    )
+    y_pred_prob = model.predict(eval_gen)
+    y_pred = np.argmax(y_pred_prob, axis=-1)
+    y_true = eval_gen.classes
+    classes_list = list(eval_gen.class_indices.keys())
+    save_model_metrics(y_true, y_pred, classes_list, "number_cnn", RESULTS_DIR)
+
 
 def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
     if not data_csv.exists():
@@ -184,6 +203,8 @@ def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
     with model_path.open("wb") as file_handle:
         pickle.dump({"model": model, "encoder": encoder}, file_handle)
     print(f"Saved model to: {model_path}")
+
+    save_model_metrics(y_test, y_pred, list(encoder.classes_), "number_landmarks", RESULTS_DIR)
 
 
 def main() -> None:

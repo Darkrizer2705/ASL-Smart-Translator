@@ -15,6 +15,9 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
 from src.data.config import COMBINED_CSV, PHRASE_MODEL
+from src.utils.metrics import save_model_metrics
+
+RESULTS_DIR = ROOT_DIR / "results"
 
 
 MODEL_PARAMS = {
@@ -100,6 +103,8 @@ def train_phrase_model(
         pickle.dump({"model": model, "encoder": encoder}, file_handle)
 
     print(f"Saved model to: {model_path}")
+
+    save_model_metrics(y_test, predictions, list(encoder.classes_), "phrases", RESULTS_DIR)
 
 
 if __name__ == "__main__":
