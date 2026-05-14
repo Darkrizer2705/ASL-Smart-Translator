@@ -200,9 +200,10 @@ while True:
         if words and words[-1]:
             words.pop()
             sentence_builder.reset()
-            for w in words:
+            for i, w in enumerate(words):
                 sentence_builder.add(w)
-                sentence_builder.add("space")
+                if i < len(words) - 1:
+                    sentence_builder.add("space")
             print(f"Undone | Sentence: [{sentence_builder.get()}]")
 
     elif key == ord('r'):

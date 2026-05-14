@@ -29,7 +29,7 @@ class LLMRefiner:
             raise ValueError("GEMINI_API_KEY not found. Make sure your .env file has it.")
 
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel("gemini-2.5-flash-lite")  # free tier model
+        self.model = genai.GenerativeModel("gemini-2.0-flash")  # free tier model
 
     def refine(self, raw_sentence: str):
         """

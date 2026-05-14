@@ -160,7 +160,8 @@ def collect_with_variation():
     print("="*70)
     
     # Load existing gesture dataset
-    existing_df = pd.read_csv('datasets/gesture_dataset.csv')
+    existing_csv = ROOT_DIR / "datasets" / "gesture_dataset.csv"
+    existing_df = pd.read_csv(existing_csv)
     
     # Create new rows from collected samples
     new_rows = []
@@ -187,7 +188,7 @@ def collect_with_variation():
         new_df = pd.DataFrame(new_rows, columns=columns)
         # Combine with existing
         combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-        combined_df.to_csv('datasets/gesture_dataset.csv', index=False)
+        combined_df.to_csv(existing_csv, index=False)
         
         print(f"\n Appended {total_collected} new samples to gesture_dataset.csv")
         print(f"   Total dataset size: {len(combined_df)} samples")
