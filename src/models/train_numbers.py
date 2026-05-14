@@ -123,7 +123,7 @@ def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
         )
 
     import pandas as pd
-    from sklearn.ensemble import RandomForestClassifier
+    import xgboost as xgb
     from sklearn.metrics import accuracy_score, classification_report
     from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import LabelEncoder
@@ -160,11 +160,18 @@ def train_number_landmark_model(data_csv: Path, model_path: Path) -> None:
     print(f"Train: {len(x_train)} | Test: {len(x_test)}")
 
     print("\nTraining number landmark classifier...")
-    model = RandomForestClassifier(
+    model = xgb.XGBClassifier(
         n_estimators=200,
-        max_depth=20,
+        max_depth=8,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="multi:softprob",
         random_state=42,
         n_jobs=-1,
+        verbosity=1,
+        use_label_encoder=False,
+        eval_metric="mlogloss",
     )
     model.fit(x_train, y_train)
 
