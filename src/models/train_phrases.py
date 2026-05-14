@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+import xgboost as xgb
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
@@ -18,13 +19,14 @@ from src.data.config import COMBINED_CSV, PHRASE_MODEL
 
 MODEL_PARAMS = {
     "n_estimators": 300,
-    "max_depth": 25,
-    "min_samples_split": 4,
-    "min_samples_leaf": 2,
-    "max_features": "sqrt",
+    "max_depth": 8,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "objective": "multi:softprob",
     "random_state": 42,
     "n_jobs": -1,
-    "verbose": 1,
+    "verbosity": 1,
 }
 
 
@@ -67,8 +69,8 @@ def train_phrase_model(
     )
     print(f"Train: {len(x_train)} | Test: {len(x_test)}")
 
-    print("Training RandomForest classifier...")
-    model = RandomForestClassifier(**MODEL_PARAMS)
+    print("Training XGBoost classifier...")
+    model = xgb.XGBClassifier(**MODEL_PARAMS, use_label_encoder=False, eval_metric="mlogloss")
     model.fit(x_train, y_train)
 
     predictions = model.predict(x_test)
