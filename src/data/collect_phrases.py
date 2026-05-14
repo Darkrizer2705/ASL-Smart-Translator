@@ -20,7 +20,10 @@ from src.utils.mediapipe_utils import (
 # Phrases that previously needed recollection.
 BROKEN_PHRASES = [
     'MORE', 'NO', 'STOP', 'WAIT', 'BATHROOM', 'FOOD', 'HOME',
-    'HOSPITAL', 'SCHOOL', 'WATER', 'WORK', 'FRIEND', 'HE_SHE', 'YOU', 'WHEN', 'WHERE', 'WHY'
+    'HOSPITAL', 'SCHOOL', 'WATER', 'WORK', 'FRIEND', 'HE_SHE', 'YOU', 'WHEN', 'WHERE', 'WHY',
+    # Newly added phrases (never collected before)
+    'HELLO', 'GOODBYE', 'PLEASE', 'SORRY', 'THANKYOU',
+    'HAPPY', 'SAD', 'ANGRY', 'NAME',
 ]
 
 # Phrases that already worked, but are still part of the full phrase set.
