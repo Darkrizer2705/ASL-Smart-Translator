@@ -151,6 +151,9 @@ st.markdown('<div class="title">🤟 ASL Smart Translator</div>', unsafe_allow_h
 st.markdown('<div class="subtitle">Sign → Sentence → English → Hindi</div>', unsafe_allow_html=True)
 st.markdown("---")
 
+if getattr(refiner, "last_error", ""):
+    st.warning(refiner.last_error)
+
 # ── Mode selector ────────────────────────────────────
 col_m1, col_m2, col_m3, col_m4 = st.columns([1, 1, 1, 2])
 with col_m1:
@@ -225,6 +228,8 @@ if refine_btn:
             english, hindi = refiner.refine(raw)
         st.session_state.english = english
         st.session_state.hindi   = hindi
+        if getattr(refiner, "last_error", ""):
+            st.warning(refiner.last_error)
     else:
         st.warning("Nothing to refine yet — start signing!")
 
