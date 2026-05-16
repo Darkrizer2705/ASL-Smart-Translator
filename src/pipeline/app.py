@@ -25,7 +25,9 @@ from src.utils.mediapipe_utils import (
 )
 from src.pipeline.smoother import Smoother
 from src.pipeline.sentence_builder import SentenceBuilder
-from src.pipeline.llm_refiner import LLMRefiner
+from src.pipeline.llm_refiner import LLMRefiner, _fallback_hindi_translation
+from src.llm.rag_pipeline import rag_refine
+from src.llm.gan_augment import generate_samples
 
 # ── Page config ─────────────────────────────────────
 st.set_page_config(
@@ -147,6 +149,21 @@ sentence_builder = st.session_state.sentence_builder
 
 
 # ── Title ────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 🧬 GAN Augmentation")
+    st.markdown("Generate synthetic data to augment the landmark dataset.")
+    gan_label = st.selectbox("Select phrase", MODELS["Phrase"][1].classes_)
+    gan_n = st.slider("Samples to generate", 10, 500, 50)
+    if st.button("Generate Synthetic Data", use_container_width=True):
+        try:
+            with st.spinner(f"Generating {gan_n} samples for '{gan_label}'..."):
+                fake_data = generate_samples(gan_label, gan_n)
+            st.success(f"✅ Generated {fake_data.shape[0]} realistic fake samples!")
+            st.dataframe(fake_data[:5])
+            st.caption("Showing first 5 generated landmark vectors")
+        except Exception as e:
+            st.error(f"GAN not trained or error: {e}")
+
 st.markdown('<div class="title">🤟 ASL Smart Translator</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Sign → Sentence → English → Hindi</div>', unsafe_allow_html=True)
 st.markdown("---")
@@ -204,11 +221,13 @@ with col_out:
     st.markdown("---")
 
     # Action buttons
-    btn1, btn2 = st.columns(2)
+    btn1, btn2, btn3 = st.columns([1, 1, 1])
     with btn1:
-        refine_btn = st.button("✨ Refine with Gemini", use_container_width=True)
+        refine_btn = st.button("✨ Refine (Gemini)", use_container_width=True)
     with btn2:
-        clear_btn  = st.button("🗑️ Clear",              use_container_width=True)
+        rag_btn = st.button("🧠 Refine (RAG)", use_container_width=True)
+    with btn3:
+        clear_btn  = st.button("🗑️ Clear", use_container_width=True)
 
     col_u1, col_u2 = st.columns(2)
     with col_u1:
@@ -230,6 +249,23 @@ if refine_btn:
         st.session_state.hindi   = hindi
         if getattr(refiner, "last_error", ""):
             st.warning(refiner.last_error)
+    else:
+        st.warning("Nothing to refine yet — start signing!")
+
+if rag_btn:
+    raw = st.session_state.sentence.strip()
+    if raw:
+        with st.spinner("RAG Pipeline: Retrieving context & asking Claude..."):
+            try:
+                res = rag_refine(raw.split())
+                eng = res.get("refined", "")
+                hin = _fallback_hindi_translation(eng) if eng else ""
+                st.session_state.english = eng
+                st.session_state.hindi = hin
+                if res.get("retrieved"):
+                    st.toast(f"Retrieved docs: {', '.join(res['retrieved'])}", icon="📚")
+            except Exception as e:
+                st.error(f"RAG failed: {e}")
     else:
         st.warning("Nothing to refine yet — start signing!")
 

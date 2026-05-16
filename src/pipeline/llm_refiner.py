@@ -112,19 +112,22 @@ class LLMRefiner:
         self.last_error = ""
         prompt = f"""You are a grammar correction assistant for an ASL (American Sign Language) translator.
 
-ASL grammar skips articles, helper verbs, and prepositions.
+ASL translations often contain literal glosses, missing articles, missing helper verbs, incorrect pronouns (like "me" instead of "my" or "I"), and missing prepositions.
 Do two things with the ASL text below:
-1. Convert it into natural, grammatically correct English
-2. Translate that English sentence into Hindi
+1. Convert it into natural, fluent, and grammatically correct English.
+2. Translate that English sentence into Hindi.
 
 Rules:
-- Keep the meaning exactly the same, just fix the grammar
-- Add missing words (a, the, is, will, to, etc.)
-- Capitalize properly and add punctuation
-- If the input is a single word, just clean it up and translate it
+- Keep the original meaning, but completely fix the grammar.
+- Add missing words (a, the, is, am, are, will, to, etc.).
+- Fix incorrect pronouns (e.g., change "me name" to "my name", "me go" to "I go").
+- Fix word order if it is unnatural in English.
+- Capitalize properly and add punctuation.
+- If the input is a single word, just clean it up and translate it.
 - Reply with a JSON object only. No markdown, no code fences, no extra text.
 - The JSON must have exactly these keys: english, hindi
-- Example: {{"english": "I will go to school tomorrow.", "hindi": "मैं कल स्कूल जाऊंगा।"}}
+- Example 1: ASL text "I GO SCHOOL TOMORROW" -> {{"english": "I will go to school tomorrow.", "hindi": "मैं कल स्कूल जाऊंगा।"}}
+- Example 2: ASL text "Hello me name Ava" -> {{"english": "Hello, my name is Ava.", "hindi": "नमस्ते, मेरा नाम अवा है।"}}
 
 ASL text: {raw_sentence}"""
 
@@ -165,6 +168,7 @@ if __name__ == "__main__":
         "WATER WHERE",
         "I LOVE YOU",
         "SHE SICK YESTERDAY",
+        "Hello me name Ava",
     ]
 
     print("Testing LLM Refiner...\n")
